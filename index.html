@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Baby Weight – Kalman Filter</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #121821;
+      --ink: #e8eef7;
+      --muted: #a8b3c7;
+      --accent: #6aa9ff;
+      --ok: #3ecf8e;
+      --warn: #ffcc66;
+      --err: #ff6b6b;
+      --grid: #223246;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+    }
+    header { padding: 16px 20px; border-bottom: 1px solid #1b2533; }
+    header h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: .2px; }
+    header p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+
+    .wrap { display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 16px; }
+
+    .card {
+      background: var(--panel); border: 1px solid #1b2533; border-radius: 14px; padding: 14px; box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset;
+    }
+    .card h2 { margin: 4px 0 10px; font-size: 14px; font-weight: 600; color: var(--ink); }
+
+    .controls { display: grid; gap: 10px; }
+    .row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+    label { font-size: 12px; color: var(--muted); }
+    input[type="number"], input[type="text"], select {
+      width: 120px; background: #0f1520; color: var(--ink); border: 1px solid #243449; border-radius: 10px; padding: 6px 8px; font-size: 12px;
+    }
+    input[type="checkbox"] { transform: translateY(1px); }
+    .hint { font-size: 11px; color: var(--muted); margin-top: -4px; }
+
+    .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+    button, .file {
+      appearance: none; border: 1px solid #1f2a3a; background: #162031; color: var(--ink);
+      padding: 8px 10px; border-radius: 10px; font-size: 12px; cursor: pointer; transition: .15s ease;
+    }
+    button:hover, .file:hover { border-color: #2a3b52; background: #1a2740; }
+    button.primary { background: #173156; border-color: #274a76; }
+    button.primary:hover { background: #1a3a69; }
+    .file input { display:none; }
+
+    #chart { width: 100%; height: 460px; background: #0d1420; border: 1px solid #1b2533; border-radius: 14px; }
+    .legend { display:flex; gap:12px; align-items:center; font-size:12px; color: var(--muted); margin-top: 8px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display:inline-block; }
+    .dot.obs { background: var(--warn); }
+    .dot.fil { background: var(--accent); }
+    .dot.smo { background: var(--ok); }
+
+    .footer { padding: 8px 16px 16px; font-size: 11px; color: var(--muted); }
+    .bad { color: var(--err); }
+    .good { color: var(--ok); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    .small { font-size: 11px; color: var(--muted); }
+
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 6px 8px; border-bottom: 1px solid #1b2533; text-align: left; }
+    th { color: var(--muted); font-weight: 600; }
+    .scroll { max-height: 180px; overflow: auto; border: 1px solid #1b2533; border-radius: 10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Baby Weight – Kalman Filter</h1>
+    <p>Import CSV (datetime, weight[g]). Estimate true weight with growth + mean-reverting bias.</p>
+  </header>
+
+  <div class="wrap">
+    <section class="card">
+      <h2>1) Data</h2>
+      <div class="controls" style="margin-bottom:12px;">
+        <label class="file"> <input id="file" type="file" accept=".csv" /> <span>Choose CSV…</span> </label>
+        <div class="hint">CSV headers supported: <span class="mono">datetime, weight</span>. Datetime parsed by <span class="mono">Date</span>.</div>
+        <div class="btns">
+          <button id="run" class="primary" disabled>Run Kalman</button>
+          <button id="download" disabled>Download Results CSV</button>
+        </div>
+      </div>
+
+      <h2>2) Model</h2>
+      <div class="controls">
+        <div class="row"><label>Initial gain g₀ (g/day)</label><input id="g0" type="number" step="1" value="30" /></div>
+        <div class="row"><label>Init σ(w₀) [g]</label><input id="sw0" type="number" step="1" value="200" /></div>
+        <div class="row"><label>Init σ(g₀) [g/day]</label><input id="sg0" type="number" step="1" value="50" /></div>
+        <div class="row"><label>Init σ(b₀) [g]</label><input id="sb0" type="number" step="1" value="100" /></div>
+        <div class="row"><label>Meas. σ (scale) [g]</label><input id="rStd" type="number" step="1" value="10" /></div>
+        <div class="row"><label>Growth drift q_g [(g/day)²/day]</label><input id="qg" type="number" step="1" value="9" /></div>
+        <div class="row"><label>Direct weight q_w [g²/day]</label><input id="qw" type="number" step="1" value="0" /></div>
+        <div class="row"><label>Bias τ (hours)</label><input id="tauH" type="number" step="0.1" value="8" /></div>
+        <div class="row"><label>Bias steady σ_b [g]</label><input id="sb" type="number" step="1" value="100" /></div>
+        <div class="row"><label>Outlier gate (z-score)</label><input id="zgate" type="number" step="0.1" value="3" /></div>
+        <div class="row"><label>Use RTS smoother</label><input id="useSmooth" type="checkbox" checked /></div>
+      </div>
+    </section>
+
+    <section class="card" style="display:grid; grid-template-rows: auto 1fr auto; gap: 10px;">
+      <div>
+        <h2>Chart</h2>
+        <div id="chart"></div>
+        <div class="legend">
+          <span class="dot obs"></span> Observed &nbsp;&nbsp;
+          <span class="dot fil"></span> Filtered &nbsp;&nbsp;
+          <span class="dot smo"></span> Smoothed
+        </div>
+      </div>
+      <div>
+        <h2>Run log</h2>
+        <div class="scroll"><table id="log"><thead><tr>
+          <th>#</th><th>Datetime</th><th>z (g)</th><th>ŵ (g)</th><th>ĝ (g/day)</th><th>b̂ (g)</th><th>Gate</th>
+        </tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="footer small">All calculations are local in your browser.</div>
+    </section>
+  </div>
+
+  <script>
+    // ---------- Utilities ----------
+    const fmtNum = (x, d=1) => (Number.isFinite(x)? x.toFixed(d): "");
+    const by = (sel) => document.querySelector(sel);
+
+    function parseCSV(text) {
+      const lines = text.split(/\r?\n/).filter(s => s.trim().length);
+      if (!lines.length) return [];
+      let hasHeader = false;
+      let idxT = 0, idxW = 1;
+      const first = lines[0].split(/,\s*/);
+      if (first.length >= 2 && /date|time/i.test(first[0]) && /weight|gram/i.test(first[1])) {
+        hasHeader = true;
+      }
+      const start = hasHeader ? 1 : 0;
+      const rows = [];
+      for (let i = start; i < lines.length; i++) {
+        const parts = lines[i].split(/,\s*/);
+        if (parts.length < 2) continue;
+        const t = Date.parse(parts[idxT]);
+        const w = parseFloat(parts[idxW]);
+        if (!Number.isFinite(t) || !Number.isFinite(w)) continue;
+        rows.push({ t, w, iso: new Date(t).toISOString() });
+      }
+      rows.sort((a,b)=>a.t-b.t);
+      return rows;
+    }
+
+    function download(filename, text) {
+      const blob = new Blob([text], {type: 'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    // ---------- Linear algebra (3x3) ----------
+    function matMul(A,B) { // 3x3 x 3x3
+      const C = [[0,0,0],[0,0,0],[0,0,0]];
+      for (let i=0;i<3;i++) for (let k=0;k<3;k++) {
+        let s=0; for (let j=0;j<3;j++) s += A[i][j]*B[j][k]; C[i][k]=s;
+      }
+      return C;
+    }
+    function matVec(A,v){ return [A[0][0]*v[0]+A[0][1]*v[1]+A[0][2]*v[2], A[1][0]*v[0]+A[1][1]*v[1]+A[1][2]*v[2], A[2][0]*v[0]+A[2][1]*v[1]+A[2][2]*v[2]]; }
+    function vecAdd(a,b){ return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
+    function vecSub(a,b){ return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+    function matAdd(A,B){ return [[A[0][0]+B[0][0],A[0][1]+B[0][1],A[0][2]+B[0][2]],[A[1][0]+B[1][0],A[1][1]+B[1][1],A[1][2]+B[1][2]],[A[2][0]+B[2][0],A[2][1]+B[2][1],A[2][2]+B[2][2]]]; }
+    function matSub(A,B){ return [[A[0][0]-B[0][0],A[0][1]-B[0][1],A[0][2]-B[0][2]],[A[1][0]-B[1][0],A[1][1]-B[1][1],A[1][2]-B[1][2]],[A[2][0]-B[2][0],A[2][1]-B[2][1],A[2][2]-B[2][2]]]; }
+    function matT(A){ return [[A[0][0],A[1][0],A[2][0]],[A[0][1],A[1][1],A[2][1]],[A[0][2],A[1][2],A[2][2]]]; }
+    function matInv3(A){ // regularized 3x3 inverse
+      const a=A[0][0], b=A[0][1], c=A[0][2], d=A[1][0], e=A[1][1], f=A[1][2], g=A[2][0], h=A[2][1], i=A[2][2];
+      // add tiny jitter to diagonal for stability
+      const eps=1e-9; const Aeps=[[a+eps,b,c],[d,e+eps,f],[g,h,i+eps]];
+      const ae=Aeps[0][0], be=Aeps[0][1], ce=Aeps[0][2], de=Aeps[1][0], ee=Aeps[1][1], fe=Aeps[1][2], ge=Aeps[2][0], he=Aeps[2][1], ie=Aeps[2][2];
+      const A11 =  (ee*ie - fe*he);
+      const A12 = -(de*ie - fe*ge);
+      const A13 =  (de*he - ee*ge);
+      const A21 = -(be*ie - ce*he);
+      const A22 =  (ae*ie - ce*ge);
+      const A23 = -(ae*he - be*ge);
+      const A31 =  (be*fe - ce*ee);
+      const A32 = -(ae*fe - ce*de);
+      const A33 =  (ae*ee - be*de);
+      const det = ae*A11 + be*A12 + ce*A13;
+      if (Math.abs(det) < 1e-12) throw new Error('Matrix near singular');
+      const invDet = 1/det;
+      return [[A11*invDet, A21*invDet, A31*invDet], [A12*invDet, A22*invDet, A32*invDet], [A13*invDet, A23*invDet, A33*invDet]];
+    }
+
+    // ---------- Kalman + RTS for 3-state [w,g,b] ----------
+    function runKalman(records, params) {
+      const { g0, sw0, sg0, sb0, rStd, qg, qw, tauDays, sb, zGate, useSmooth } = params;
+      if (records.length === 0) return { rows: [], filtered: [], smoothed: [] };
+
+      const H = [1,0,1];
+      const R = rStd*rStd;
+
+      // init state
+      let x = [ records[0].w, g0, 0 ];
+      let P = [[sw0*sw0, 0, 0], [0, sg0*sg0, 0], [0,0, sb0*sb0]];
+
+      const filtered = []; // {t, iso, z, w, g, b, gated?}
+      const preds = [];    // store x^- and P^- for smoother
+      const Fs = [];       // F_k for RTS
+      const Ppreds = [];   // P^-
+      const xs = [];       // x^ (filtered)
+      const Ps = [];       // P^ (filtered)
+
+      let tPrev = records[0].t;
+
+      for (let k=0; k<records.length; k++) {
+        const { t, w: z, iso } = records[k];
+        const dtDays = k===0 ? 0 : Math.max(0, (t - tPrev) / 86400000);
+        tPrev = t;
+
+        // Build F and Q for this step
+        const phi = Math.exp(- (dtDays / Math.max(1e-6, tauDays)) );
+        const F = [ [1, dtDays, 0], [0,1,0], [0,0, phi] ];
+        // Q components
+        const Qg = [
+          [ qg*(dtDays**3)/3, qg*(dtDays**2)/2, 0 ],
+          [ qg*(dtDays**2)/2, qg*dtDays,        0 ],
+          [ 0, 0, 0 ]
+        ];
+        const Qw = [ [ qw*dtDays, 0, 0 ], [0,0,0], [0,0,0] ];
+        const Qb = [ [0,0,0],[0,0,0],[0,0,(1-phi*phi)*sb*sb] ];
+        const Q = matAdd(matAdd(Qg,Qw),Qb);
+
+        // Predict
+        const xpred = matVec(F, x);
+        const Ppred = matAdd( matMul( matMul(F,P), matT(F) ), Q );
+
+        // Innovation
+        const Hx = H[0]*xpred[0] + H[1]*xpred[1] + H[2]*xpred[2];
+        const y = z - Hx;
+        const S = H[0]*(Ppred[0][0]*H[0] + Ppred[0][1]*H[1] + Ppred[0][2]*H[2]) +
+                  H[1]*(Ppred[1][0]*H[0] + Ppred[1][1]*H[1] + Ppred[1][2]*H[2]) +
+                  H[2]*(Ppred[2][0]*H[0] + Ppred[2][1]*H[1] + Ppred[2][2]*H[2]) + R;
+
+        const zScore = Math.abs(y)/Math.sqrt(S);
+        let gated = false;
+        if (zGate > 0 && zScore > zGate) {
+          // Skip update, accept prediction
+          x = xpred; P = Ppred; gated = true;
+        } else {
+          // Kalman gain K = P^- H^T S^{-1} ; since H is 1x3, K is 3x1
+          const PHt = [
+            Ppred[0][0]*H[0] + Ppred[0][1]*H[1] + Ppred[0][2]*H[2],
+            Ppred[1][0]*H[0] + Ppred[1][1]*H[1] + Ppred[1][2]*H[2],
+            Ppred[2][0]*H[0] + Ppred[2][1]*H[1] + Ppred[2][2]*H[2]
+          ];
+          const invS = 1 / S;
+          const K = [ PHt[0]*invS, PHt[1]*invS, PHt[2]*invS ];
+          // Update state
+          x = [ xpred[0] + K[0]*y, xpred[1] + K[1]*y, xpred[2] + K[2]*y ];
+          // Update covariance: P = (I-KH) Ppred
+          const KH = [ [K[0]*H[0], K[0]*H[1], K[0]*H[2]],
+                       [K[1]*H[0], K[1]*H[1], K[1]*H[2]],
+                       [K[2]*H[0], K[2]*H[1], K[2]*H[2]] ];
+          const I = [[1,0,0],[0,1,0],[0,0,1]];
+          P = matMul( matSub(I, KH), Ppred );
+        }
+
+        // Store
+        filtered.push({ t, iso, z, w: x[0], g: x[1], b: x[2], gated, zScore });
+        preds.push({ xpred, Ppred });
+        Fs.push(F);
+        Ppreds.push(Ppred);
+        xs.push([...x]);
+        Ps.push([[...P[0]],[...P[1]],[...P[2]]]);
+      }
+
+      // RTS smoothing (optional)
+      let smoothed = filtered.map((r,i)=>({ ...r }));
+      if (useSmooth && filtered.length >= 2) {
+        const n = filtered.length;
+        let xhat = [...xs[n-1]];
+        let Phat = [[...Ps[n-1][0]],[...Ps[n-1][1]],[...Ps[n-1][2]]];
+        smoothed[n-1].ws = xhat[0]; smoothed[n-1].gs = xhat[1]; smoothed[n-1].bs = xhat[2];
+        for (let k=n-2; k>=0; k--) {
+          const Fk1 = Fs[k+1]; // F_{k+1}
+          const Pk = Ps[k];
+          const Pk1pred = Ppreds[k+1];
+          let Ck;
+          try {
+            const Pk1inv = matInv3(Pk1pred);
+            Ck = matMul( matMul(Pk, matT(Fk1)), Pk1inv );
+          } catch (e) {
+            // fallback: no smoothing for this step
+            Ck = [[0,0,0],[0,0,0],[0,0,0]];
+          }
+          const xk = xs[k];
+          const xk1 = xs[k+1];
+          const dx = vecSub([xhat[0],xhat[1],xhat[2]], xk1);
+          const Ck_dx = matVec(Ck, dx);
+          xhat = vecAdd(xk, Ck_dx);
+          // covariance smoothing omitted (not needed for plotting/export); can be added if required
+          smoothed[k].ws = xhat[0]; smoothed[k].gs = xhat[1]; smoothed[k].bs = xhat[2];
+        }
+      } else {
+        smoothed.forEach((r)=>{ r.ws = r.w; r.gs = r.g; r.bs = r.b; });
+      }
+
+      return { filtered, smoothed };
+    }
+
+    // ---------- Charting (Canvas) ----------
+    function drawChart(container, data) {
+      const el = container;
+      el.innerHTML = '';
+      const W = el.clientWidth || 800, H = el.clientHeight || 460;
+      const canvas = document.createElement('canvas');
+      canvas.width = W; canvas.height = H; canvas.style.width = '100%'; canvas.style.height = '100%';
+      el.appendChild(canvas);
+      const ctx = canvas.getContext('2d');
+
+      if (!data || !data.length) {
+        ctx.fillStyle = '#667'; ctx.font = '12px sans-serif';
+        ctx.fillText('Load data and run the filter.', 16, 24); return;
+      }
+
+      const pad = { l: 48, r: 16, t: 16, b: 28 };
+      const xs = data.map(d=>d.t);
+      const ys = [];
+      data.forEach(d=>{ ys.push(d.z); ys.push(d.w); ys.push(d.ws); });
+      let t0 = Math.min(...xs), t1 = Math.max(...xs); if (t1===t0) t1 = t0 + 60*60*1000;
+      const y0 = Math.min(...ys), y1 = Math.max(...ys);
+      const yrPad = (y1-y0)*0.08 || 10;
+      const ymin = y0 - yrPad, ymax = y1 + yrPad;
+      const sx = (W-pad.l-pad.r)/(t1-t0);
+      const sy = (H-pad.t-pad.b)/(ymax-ymin);
+      const X = t => pad.l + (t - t0)*sx;
+      const Y = v => H - pad.b - (v - ymin)*sy;
+
+      // grid
+      ctx.fillStyle = '#9ab'; ctx.font = '11px sans-serif'; ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid');
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2,3]);
+      // y grid (5 ticks)
+      for (let k=0;k<=5;k++){
+        const v = ymin + (k/5)*(ymax-ymin); const y = Y(v);
+        ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W-pad.r, y); ctx.stroke();
+        ctx.fillText(v.toFixed(0)+' g', 6, y+4);
+      }
+      // x grid (5 ticks)
+      for (let k=0;k<=5;k++){
+        const t = t0 + (k/5)*(t1-t0); const x = X(t);
+        ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, H-pad.b); ctx.stroke();
+        const d = new Date(t);
+        const lbl = d.toLocaleString();
+        ctx.fillText(lbl, x-30, H-8);
+      }
+      ctx.setLineDash([]);
+
+      // draw helpers
+      function polyline(getX, getY, color, width, alpha=1) {
+        ctx.strokeStyle = color; ctx.lineWidth = width; ctx.globalAlpha = alpha; ctx.beginPath();
+        let started=false; for (const p of data) { const x=getX(p), y=getY(p); if (!started){ ctx.moveTo(x,y); started=true;} else { ctx.lineTo(x,y);} }
+        ctx.stroke(); ctx.globalAlpha = 1;
+      }
+
+      // Observations
+      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--warn');
+      for (const d of data) { const x=X(d.t), y=Y(d.z); ctx.beginPath(); ctx.arc(x,y,2,0,Math.PI*2); ctx.fill(); }
+
+      // Filtered
+      polyline(d=>X(d.t), d=>Y(d.w), getComputedStyle(document.documentElement).getPropertyValue('--accent'), 1.6);
+      // Smoothed
+      polyline(d=>X(d.t), d=>Y(d.ws), getComputedStyle(document.documentElement).getPropertyValue('--ok'), 1.8);
+    }
+
+    // ---------- UI wiring ----------
+    let records = [];
+    by('#file').addEventListener('change', async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      const text = await f.text();
+      records = parseCSV(text);
+      const ok = records.length>0;
+      by('#run').disabled = !ok; by('#download').disabled = true;
+      drawChart(by('#chart'), []);
+      const tbody = by('#log tbody'); tbody.innerHTML = '';
+      if (!ok) alert('No valid rows found. Expect two columns: datetime, weight');
+    });
+
+    by('#run').addEventListener('click', () => {
+      if (!records.length) return;
+      const params = {
+        g0: parseFloat(by('#g0').value),
+        sw0: parseFloat(by('#sw0').value),
+        sg0: parseFloat(by('#sg0').value),
+        sb0: parseFloat(by('#sb0').value),
+        rStd: Math.max(0.1, parseFloat(by('#rStd').value)),
+        qg: Math.max(0, parseFloat(by('#qg').value)),
+        qw: Math.max(0, parseFloat(by('#qw').value)),
+        tauDays: Math.max(1e-6, parseFloat(by('#tauH').value)/24),
+        sb: Math.max(0, parseFloat(by('#sb').value)),
+        zGate: Math.max(0, parseFloat(by('#zgate').value)),
+        useSmooth: by('#useSmooth').checked,
+      };
+      const { filtered, smoothed } = runKalman(records, params);
+      // merge for display
+      const rows = filtered.map((r,i)=>({ ...r, ws: smoothed[i].ws, gs: smoothed[i].gs, bs: smoothed[i].bs }));
+      drawChart(by('#chart'), rows);
+
+      // Fill log table
+      const tbody = by('#log tbody'); tbody.innerHTML = '';
+      rows.forEach((r, idx) => {
+        const tr = document.createElement('tr');
+        const flag = r.gated ? '<span class="bad">yes</span>' : '';
+        tr.innerHTML = `<td>${idx+1}</td><td>${r.iso.replace('T',' ').replace('Z','')}</td><td>${fmtNum(r.z,0)}</td>`+
+                       `<td>${fmtNum(r.w,0)}</td><td>${fmtNum(r.g,1)}</td><td>${fmtNum(r.b,0)}</td><td>${flag}</td>`;
+        tbody.appendChild(tr);
+      });
+
+      // enable export
+      by('#download').disabled = false;
+      by('#download').onclick = () => {
+        let csv = 'datetime,observed_g,filtered_w_g,filtered_g_g_per_day,filtered_b_g,smoothed_w_g,smoothed_g_g_per_day,smoothed_b_g,gated\n';
+        rows.forEach(r => {
+          csv += `${r.iso},${r.z},${r.w},${r.g},${r.b},${r.ws},${r.gs},${r.bs},${r.gated?1:0}\n`;
+        });
+        download('kalman_results.csv', csv);
+      };
+    });
+
+    // Initial empty chart
+    drawChart(by('#chart'), []);
+  </script>
+</body>
+</html>
