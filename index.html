@@ -130,103 +130,103 @@
     const fmtNum = (x, d=1) => (Number.isFinite(x)? x.toFixed(d): "");
     const by = (sel) => document.querySelector(sel);
 
-function parseCSV(text) {
-  // --- tiny CSV splitter that respects quotes ---
-  function splitCSV(line) {
-    const out = [];
-    let cur = '';
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const c = line[i];
-      if (c === '"') {
-        if (inQuotes && line[i + 1] === '"') { // escaped quote
-          cur += '"';
-          i++;
-        } else {
-          inQuotes = !inQuotes;
-        }
-      } else if (c === ',' && !inQuotes) {
-        out.push(cur);
-        cur = '';
-      } else {
-        cur += c;
-      }
-    }
-    out.push(cur);
-    // trim cells
-    return out.map(s => s.trim());
-  }
+		function parseCSV(text) {
+			// --- tiny CSV splitter that respects quotes ---
+			function splitCSV(line) {
+				const out = [];
+				let cur = '';
+				let inQuotes = false;
+				for (let i = 0; i < line.length; i++) {
+					const c = line[i];
+					if (c === '"') {
+						if (inQuotes && line[i + 1] === '"') { // escaped quote
+							cur += '"';
+							i++;
+						} else {
+							inQuotes = !inQuotes;
+						}
+					} else if (c === ',' && !inQuotes) {
+						out.push(cur);
+						cur = '';
+					} else {
+						cur += c;
+					}
+				}
+				out.push(cur);
+				// trim cells
+				return out.map(s => s.trim());
+			}
 
-  const lines = text.split(/\r?\n/).filter(s => s.trim().length);
-  if (!lines.length) return [];
+			const lines = text.split(/\r?\n/).filter(s => s.trim().length);
+			if (!lines.length) return [];
 
-  // Parse header to detect format
-  const header = splitCSV(lines[0]).map(h => h.replace(/^"|"$/g, ''));
-  const hasGrowthFormat =
-    header.some(h => /type/i.test(h)) &&
-    header.some(h => /^start$/i.test(h)) &&
-    header.some(h => /start\s*condition/i.test(h));
+			// Parse header to detect format
+			const header = splitCSV(lines[0]).map(h => h.replace(/^"|"$/g, ''));
+			const hasGrowthFormat =
+				header.some(h => /type/i.test(h)) &&
+				header.some(h => /^start$/i.test(h)) &&
+				header.some(h => /start\s*condition/i.test(h));
 
-  const rows = [];
+			const rows = [];
 
-  if (hasGrowthFormat) {
-    // Column indexes
-    const idxType = header.findIndex(h => /type/i.test(h));
-    const idxStart = header.findIndex(h => /^start$/i.test(h));
-    const idxStartCond = header.findIndex(h => /start\s*condition/i.test(h));
+			if (hasGrowthFormat) {
+				// Column indexes
+				const idxType = header.findIndex(h => /type/i.test(h));
+				const idxStart = header.findIndex(h => /^start$/i.test(h));
+				const idxStartCond = header.findIndex(h => /start\s*condition/i.test(h));
 
-    for (let i = 1; i < lines.length; i++) {
-      const parts = splitCSV(lines[i]).map(v => v.replace(/^"|"$/g, ''));
-      if (!parts.length) continue;
+				for (let i = 1; i < lines.length; i++) {
+					const parts = splitCSV(lines[i]).map(v => v.replace(/^"|"$/g, ''));
+					if (!parts.length) continue;
 
-      const type = parts[idxType] || '';
-      if (!/^\s*growth\s*$/i.test(type)) continue;
+					const type = parts[idxType] || '';
+					if (!/^\s*growth\s*$/i.test(type)) continue;
 
-      const startStr = (parts[idxStart] || '').trim();
-      const cond = (parts[idxStartCond] || '').trim();
+					const startStr = (parts[idxStart] || '').trim();
+					const cond = (parts[idxStartCond] || '').trim();
 
-      // Extract weight in kg from Start Condition (e.g., "3.59kg")
-      const m = cond.match(/([\d.]+)\s*kg\b/i);
-      if (!m) continue;
-      const kg = parseFloat(m[1]);
-      if (!Number.isFinite(kg)) continue;
+					// Extract weight in kg from Start Condition (e.g., "3.59kg")
+					const m = cond.match(/([\d.]+)\s*kg\b/i);
+					if (!m) continue;
+					const kg = parseFloat(m[1]);
+					if (!Number.isFinite(kg)) continue;
 
-      // Convert to grams (rounded to nearest gram)
-      const w = Math.round(kg * 1000);
+					// Convert to grams (rounded to nearest gram)
+					const w = Math.round(kg * 1000);
 
-      // Parse timestamp
-      const t = Date.parse(startStr.replace(' ', 'T'));
-      if (!Number.isFinite(t)) continue;
+					// Parse timestamp
+					const t = Date.parse(startStr.replace(' ', 'T'));
+					if (!Number.isFinite(t)) continue;
 
-      rows.push({ t, w, iso: new Date(t).toISOString() });
-    }
-  } else {
-    // Fallback: original simple "datetime,weight_grams" format
-    let hasHeader = false;
-    let idxT = 0, idxW = 1;
-    const first = splitCSV(lines[0]).map(s => s.replace(/^"|"$/g, ''));
-    if (
-      first.length >= 2 &&
-      /date|time/i.test(first[0]) &&
-      /weight|gram/i.test(first[1])
-    ) {
-      hasHeader = true;
-    }
-    const start = hasHeader ? 1 : 0;
+					rows.push({ t, w, iso: new Date(t).toISOString() });
+				}
+			} else {
+				// Fallback: original simple "datetime,weight_grams" format
+				let hasHeader = false;
+				let idxT = 0, idxW = 1;
+				const first = splitCSV(lines[0]).map(s => s.replace(/^"|"$/g, ''));
+				if (
+					first.length >= 2 &&
+					/date|time/i.test(first[0]) &&
+					/weight|gram/i.test(first[1])
+				) {
+					hasHeader = true;
+				}
+				const start = hasHeader ? 1 : 0;
 
-    for (let i = start; i < lines.length; i++) {
-      const parts = splitCSV(lines[i]).map(s => s.replace(/^"|"$/g, ''));
-      if (parts.length < 2) continue;
-      const t = Date.parse((parts[idxT] || '').replace(' ', 'T'));
-      const w = parseFloat(parts[idxW]);
-      if (!Number.isFinite(t) || !Number.isFinite(w)) continue;
-      rows.push({ t, w, iso: new Date(t).toISOString() });
-    }
-  }
+				for (let i = start; i < lines.length; i++) {
+					const parts = splitCSV(lines[i]).map(s => s.replace(/^"|"$/g, ''));
+					if (parts.length < 2) continue;
+					const t = Date.parse((parts[idxT] || '').replace(' ', 'T'));
+					const w = parseFloat(parts[idxW]);
+					if (!Number.isFinite(t) || !Number.isFinite(w)) continue;
+					rows.push({ t, w, iso: new Date(t).toISOString() });
+				}
+			}
 
-  rows.sort((a, b) => a.t - b.t);
-  return rows;
-}
+			rows.sort((a, b) => a.t - b.t);
+			return rows;
+		}
 
     function download(filename, text) {
       const blob = new Blob([text], {type: 'text/csv;charset=utf-8;'});
@@ -387,71 +387,102 @@ function parseCSV(text) {
       return { filtered, smoothed };
     }
 
-    // ---------- Charting (Canvas) ----------
-    function drawChart(container, data) {
-      const el = container;
-      el.innerHTML = '';
-      const W = el.clientWidth || 800, H = el.clientHeight || 460;
-      const canvas = document.createElement('canvas');
-      canvas.width = W; canvas.height = H; canvas.style.width = '100%'; canvas.style.height = '100%';
-      el.appendChild(canvas);
-      const ctx = canvas.getContext('2d');
+		// ---------- Charting (Canvas) ----------
+		function drawChart(container, data) {
+			const el = container;
+			el.innerHTML = '';
+			const W = el.clientWidth || 800, H = el.clientHeight || 460;
+			const canvas = document.createElement('canvas');
+			canvas.width = W; canvas.height = H; canvas.style.width = '100%'; canvas.style.height = '100%';
+			el.appendChild(canvas);
+			const ctx = canvas.getContext('2d');
 
-      if (!data || !data.length) {
-        ctx.fillStyle = '#667'; ctx.font = '12px sans-serif';
-        ctx.fillText('Load data and run the filter.', 16, 24); return;
-      }
+			if (!data || !data.length) {
+				ctx.fillStyle = '#667'; ctx.font = '12px sans-serif';
+				ctx.fillText('Load data and run the filter.', 16, 24); return;
+			}
 
-      const pad = { l: 48, r: 16, t: 16, b: 28 };
-      const xs = data.map(d=>d.t);
-      const ys = [];
-      data.forEach(d=>{ ys.push(d.z); ys.push(d.w); ys.push(d.ws); });
-      let t0 = Math.min(...xs), t1 = Math.max(...xs); if (t1===t0) t1 = t0 + 60*60*1000;
-      const y0 = Math.min(...ys), y1 = Math.max(...ys);
-      const yrPad = (y1-y0)*0.08 || 10;
-      const ymin = y0 - yrPad, ymax = y1 + yrPad;
-      const sx = (W-pad.l-pad.r)/(t1-t0);
-      const sy = (H-pad.t-pad.b)/(ymax-ymin);
-      const X = t => pad.l + (t - t0)*sx;
-      const Y = v => H - pad.b - (v - ymin)*sy;
+			const hasKey = k => data.some(d => Number.isFinite(d[k]));
+			const wKey = hasKey('w') ? 'w' : (hasKey('z') ? 'z' : 'ws');
 
-      // grid
-      ctx.fillStyle = '#9ab'; ctx.font = '11px sans-serif'; ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid');
-      ctx.lineWidth = 1;
-      ctx.setLineDash([2,3]);
-      // y grid (5 ticks)
-      for (let k=0;k<=5;k++){
-        const v = ymin + (k/5)*(ymax-ymin); const y = Y(v);
-        ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W-pad.r, y); ctx.stroke();
-        ctx.fillText(v.toFixed(0)+' g', 6, y+4);
-      }
-      // x grid (5 ticks)
-      for (let k=0;k<=5;k++){
-        const t = t0 + (k/5)*(t1-t0); const x = X(t);
-        ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, H-pad.b); ctx.stroke();
-        const d = new Date(t);
-        const lbl = d.toLocaleString();
-        ctx.fillText(lbl, x-30, H-8);
-      }
-      ctx.setLineDash([]);
+			const pad = { l: 48, r: 16, t: 54, b: 28 }; // room for top numbers
+			const xs = data.map(d => d.t);
+			const ys = [];
+			data.forEach(d => { ys.push(d.z); ys.push(d.w); ys.push(d.ws); });
 
-      // draw helpers
-      function polyline(getX, getY, color, width, alpha=1) {
-        ctx.strokeStyle = color; ctx.lineWidth = width; ctx.globalAlpha = alpha; ctx.beginPath();
-        let started=false; for (const p of data) { const x=getX(p), y=getY(p); if (!started){ ctx.moveTo(x,y); started=true;} else { ctx.lineTo(x,y);} }
-        ctx.stroke(); ctx.globalAlpha = 1;
-      }
+			let t0 = Math.min(...xs), t1 = Math.max(...xs);
+			if (t1 === t0) t1 = t0 + 60 * 60 * 1000;
 
-      // Observations
-      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--warn');
-      for (const d of data) { const x=X(d.t), y=Y(d.z); ctx.beginPath(); ctx.arc(x,y,2,0,Math.PI*2); ctx.fill(); }
+			const yNums = ys.filter(Number.isFinite);
+			const y0 = Math.min(...yNums), y1 = Math.max(...yNums);
+			const yrPad = (y1 - y0) * 0.08 || 10;
+			const ymin = y0 - yrPad, ymax = y1 + yrPad;
 
-      // Filtered
-      polyline(d=>X(d.t), d=>Y(d.w), getComputedStyle(document.documentElement).getPropertyValue('--accent'), 1.6);
-      // Smoothed
-      polyline(d=>X(d.t), d=>Y(d.ws), getComputedStyle(document.documentElement).getPropertyValue('--ok'), 1.8);
-    }
+			const sx = (W - pad.l - pad.r) / (t1 - t0);
+			const sy = (H - pad.t - pad.b) / (ymax - ymin);
+			const X = t => pad.l + (t - t0) * sx;
+			const Y = v => H - pad.b - (v - ymin) * sy;
 
+			// ---- top stats (use model state from rows) ----
+			const last = data[data.length - 1];
+			const currentWeight = Number.isFinite(last.ws) ? last.ws
+														: Number.isFinite(last.w) ? last.w
+                        : Number.isFinite(last[wKey]) ? last[wKey] : NaN;
+
+  // g^ from model: prefer smoothed gs, then filtered g
+  const gHat = Number.isFinite(last.gs) ? last.gs
+               : Number.isFinite(last.g) ? last.g : NaN;
+
+  ctx.save();
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--ink') || '#223';
+
+  ctx.textAlign = 'left';
+  ctx.font = '700 28px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+  ctx.fillText(Number.isFinite(currentWeight) ? `${Math.round(currentWeight)} g` : '—', pad.l, 8);
+
+  ctx.textAlign = 'right';
+  ctx.font = '700 22px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+  ctx.fillText(Number.isFinite(gHat) ? `${gHat >= 0 ? '+' : ''}${gHat.toFixed(1)} g/day` : '—', W - pad.r, 10);
+  ctx.restore();
+
+  // ---- grid ----
+  ctx.fillStyle = '#9ab';
+  ctx.font = '11px sans-serif';
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid');
+  ctx.lineWidth = 1;
+  ctx.setLineDash([2, 3]);
+
+  for (let k = 0; k <= 5; k++) {
+    const v = ymin + (k / 5) * (ymax - ymin); const y = Y(v);
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    ctx.fillText(v.toFixed(0) + ' g', 6, y + 4);
+  }
+
+  for (let k = 0; k <= 5; k++) {
+    const t = t0 + (k / 5) * (t1 - t0); const x = X(t);
+    ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, H - pad.b); ctx.stroke();
+    ctx.fillText(new Date(t).toLocaleString(), x - 30, H - 8);
+  }
+
+  ctx.setLineDash([]);
+
+  // draw helpers
+  function polyline(getX, getY, color, width, alpha = 1) {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.globalAlpha = alpha; ctx.beginPath();
+    let started = false; for (const p of data) { const x = getX(p), y = getY(p); if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); } }
+    ctx.stroke(); ctx.globalAlpha = 1;
+  }
+
+  // Observations
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--warn');
+  for (const d of data) { const x = X(d.t), y = Y(d.z); ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill(); }
+
+  // Filtered
+  polyline(d => X(d.t), d => Y(d.w), getComputedStyle(document.documentElement).getPropertyValue('--accent'), 1.6);
+  // Smoothed
+  polyline(d => X(d.t), d => Y(d.ws), getComputedStyle(document.documentElement).getPropertyValue('--ok'), 1.8);
+}
     // ---------- UI wiring ----------
     let records = [];
     by('#file').addEventListener('change', async (e) => {
