@@ -130,28 +130,103 @@
     const fmtNum = (x, d=1) => (Number.isFinite(x)? x.toFixed(d): "");
     const by = (sel) => document.querySelector(sel);
 
-    function parseCSV(text) {
-      const lines = text.split(/\r?\n/).filter(s => s.trim().length);
-      if (!lines.length) return [];
-      let hasHeader = false;
-      let idxT = 0, idxW = 1;
-      const first = lines[0].split(/,\s*/);
-      if (first.length >= 2 && /date|time/i.test(first[0]) && /weight|gram/i.test(first[1])) {
-        hasHeader = true;
+function parseCSV(text) {
+  // --- tiny CSV splitter that respects quotes ---
+  function splitCSV(line) {
+    const out = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') {
+        if (inQuotes && line[i + 1] === '"') { // escaped quote
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (c === ',' && !inQuotes) {
+        out.push(cur);
+        cur = '';
+      } else {
+        cur += c;
       }
-      const start = hasHeader ? 1 : 0;
-      const rows = [];
-      for (let i = start; i < lines.length; i++) {
-        const parts = lines[i].split(/,\s*/);
-        if (parts.length < 2) continue;
-        const t = Date.parse(parts[idxT]);
-        const w = parseFloat(parts[idxW]);
-        if (!Number.isFinite(t) || !Number.isFinite(w)) continue;
-        rows.push({ t, w, iso: new Date(t).toISOString() });
-      }
-      rows.sort((a,b)=>a.t-b.t);
-      return rows;
     }
+    out.push(cur);
+    // trim cells
+    return out.map(s => s.trim());
+  }
+
+  const lines = text.split(/\r?\n/).filter(s => s.trim().length);
+  if (!lines.length) return [];
+
+  // Parse header to detect format
+  const header = splitCSV(lines[0]).map(h => h.replace(/^"|"$/g, ''));
+  const hasGrowthFormat =
+    header.some(h => /type/i.test(h)) &&
+    header.some(h => /^start$/i.test(h)) &&
+    header.some(h => /start\s*condition/i.test(h));
+
+  const rows = [];
+
+  if (hasGrowthFormat) {
+    // Column indexes
+    const idxType = header.findIndex(h => /type/i.test(h));
+    const idxStart = header.findIndex(h => /^start$/i.test(h));
+    const idxStartCond = header.findIndex(h => /start\s*condition/i.test(h));
+
+    for (let i = 1; i < lines.length; i++) {
+      const parts = splitCSV(lines[i]).map(v => v.replace(/^"|"$/g, ''));
+      if (!parts.length) continue;
+
+      const type = parts[idxType] || '';
+      if (!/^\s*growth\s*$/i.test(type)) continue;
+
+      const startStr = (parts[idxStart] || '').trim();
+      const cond = (parts[idxStartCond] || '').trim();
+
+      // Extract weight in kg from Start Condition (e.g., "3.59kg")
+      const m = cond.match(/([\d.]+)\s*kg\b/i);
+      if (!m) continue;
+      const kg = parseFloat(m[1]);
+      if (!Number.isFinite(kg)) continue;
+
+      // Convert to grams (rounded to nearest gram)
+      const w = Math.round(kg * 1000);
+
+      // Parse timestamp
+      const t = Date.parse(startStr.replace(' ', 'T'));
+      if (!Number.isFinite(t)) continue;
+
+      rows.push({ t, w, iso: new Date(t).toISOString() });
+    }
+  } else {
+    // Fallback: original simple "datetime,weight_grams" format
+    let hasHeader = false;
+    let idxT = 0, idxW = 1;
+    const first = splitCSV(lines[0]).map(s => s.replace(/^"|"$/g, ''));
+    if (
+      first.length >= 2 &&
+      /date|time/i.test(first[0]) &&
+      /weight|gram/i.test(first[1])
+    ) {
+      hasHeader = true;
+    }
+    const start = hasHeader ? 1 : 0;
+
+    for (let i = start; i < lines.length; i++) {
+      const parts = splitCSV(lines[i]).map(s => s.replace(/^"|"$/g, ''));
+      if (parts.length < 2) continue;
+      const t = Date.parse((parts[idxT] || '').replace(' ', 'T'));
+      const w = parseFloat(parts[idxW]);
+      if (!Number.isFinite(t) || !Number.isFinite(w)) continue;
+      rows.push({ t, w, iso: new Date(t).toISOString() });
+    }
+  }
+
+  rows.sort((a, b) => a.t - b.t);
+  return rows;
+}
 
     function download(filename, text) {
       const blob = new Blob([text], {type: 'text/csv;charset=utf-8;'});
@@ -383,6 +458,7 @@
       const f = e.target.files[0]; if (!f) return;
       const text = await f.text();
       records = parseCSV(text);
+			console.log(records);
       const ok = records.length>0;
       by('#run').disabled = !ok; by('#download').disabled = true;
       drawChart(by('#chart'), []);
